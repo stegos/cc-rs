@@ -1812,8 +1812,45 @@ impl Build {
             for flag in self.ar_flags.iter() {
                 ar.arg(flag);
             }
+            ar.arg("crs").arg(dst);
+
+            // Similar to https://github.com/rust-lang/rust/pull/47507
+            // and https://github.com/rust-lang/rust/pull/48548
+            let estimated_command_line_len = objects
+                .iter()
+                .chain(&self.objects)
+                .map(|a| a.as_os_str().len())
+                .sum::<usize>();
+            if target.contains("gnu") && estimated_command_line_len > 1024 * 6 {
+                let mut args = String::new();
+                for arg in objects.iter().chain(&self.objects) {
+                    args.push('"');
+                    for c in arg.to_str().unwrap().chars() {
+                        if c == '"' || c == '\\' {
+                            args.push('\\')
+                        }
+                        args.push(c)
+                    }
+                    args.push('"');
+                    args.push('\n');
+                }
+
+                let mut args_file = OsString::from(dst);
+                args_file.push(".args");
+                fs::File::create(&args_file)
+                    .unwrap()
+                    .write_all(args.as_bytes())
+                    .unwrap();
+
+                let mut args_file_arg = OsString::from("@");
+                args_file_arg.push(args_file);
+                ar.arg(args_file_arg);
+            } else {
+                ar.args(&objects).args(&self.objects);
+            }
+
             run(
-                ar.arg("crs").arg(dst).args(&objects).args(&self.objects),
+                &mut ar,
                 &cmd,
             )?;
         }
